@@ -36,7 +36,7 @@
             loadingDiv.style.display = "block"; // Show loading animation
             resultDiv.innerHTML = ""; // Clear previous results
 
-            fetch("http://127.0.0.1:5000/upload", {
+            fetch("https://your-backend.onrender.com/upload", {
                 method: "POST",
                 body: formData
             })

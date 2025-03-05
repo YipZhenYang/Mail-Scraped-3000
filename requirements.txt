@@ -1,6 +1,6 @@
-Flask==3.0.0
-flask-cors==4.0.0
-Werkzeug==3.0.1
-dnspython==2.6.1
-urllib3==2.1.0
+Flask
+Flask-Cors
+dnspython
+urllib3
+werkzeug
 gunicorn
