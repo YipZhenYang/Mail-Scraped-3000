@@ -79,10 +79,10 @@ def process_csv(file_path):
 
     return output_file, list(unique_emails)  # ✅ Ensure emails are returned
 
-@app.route("/")
+@app.route('/')
 def home():
-    """Serves the frontend page."""
-    return render_template("index.html")
+    return render_template('index.html')  # Make sure this file exists
+
                            
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -122,5 +122,5 @@ def download():
         return send_file(file_name, as_attachment=True)
     return "File not found", 404
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
