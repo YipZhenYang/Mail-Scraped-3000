@@ -4,11 +4,10 @@ import urllib.request
 import csv
 import dns.resolver  # Install with `pip install dnspython`
 import os
-import time
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
-#
-app = Flask(__name__)
+
+app = Flask(__name__, template_folder="templates")  # Ensure templates folder is used
 CORS(app)
 
 UPLOAD_FOLDER = "uploads"
@@ -22,7 +21,6 @@ emailRegex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
 
 def validate_email(email_address):
     """Validates an email by checking its domain's MX records and blacklist."""
@@ -39,7 +37,6 @@ def validate_email(email_address):
         return False
     except Exception as e:
         return False
-
 
 def extract_valid_emails(url_text):
     """Extracts and validates emails from webpage text."""
@@ -63,7 +60,7 @@ def process_csv(file_path):
     unique_emails = set()
     with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.reader(csv_file)
-        next(csv_reader, None)  # Skip header
+        next(csv_reader, None)
         for row in csv_reader:
             if len(row) >= 2:
                 name, url = row[0].strip(), row[1].strip()
@@ -78,12 +75,15 @@ def process_csv(file_path):
         for name, email in sorted(unique_emails):  
             csv_writer.writerow([name, email])
 
-
     os.remove(file_path)  # Delete uploaded CSV after processing
 
     return output_file, list(unique_emails)  # ✅ Ensure emails are returned
 
-
+@app.route("/")
+def home():
+    """Serves the frontend page."""
+    return render_template("index.html")
+                           
 @app.route("/upload", methods=["POST"])
 def upload_file():
     """Handles CSV file upload and processing."""
