@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, render_template, send_file, redirect,
 import re
 import urllib.request
 import csv
-import dns.resolver  # Install with `pip install dnspython`
+import dns.resolver
 import os
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
@@ -13,9 +13,10 @@ CORS(app)
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
 
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 emailRegex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
@@ -88,25 +89,31 @@ def home():
 def upload_file():
     """Handles CSV file upload and processing."""
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return jsonify({"error": "No file part"})
 
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "No selected file"})
+    
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
+    file.save(file_path)
 
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-        file.save(file_path)
+    return jsonify({"message": "File uploaded successfully!"})
 
-        try:
-            output_file, extracted_emails = process_csv(file_path)  # ✅ Ensures CSV writing is completed
-            return jsonify({"file": output_file, "emails": extracted_emails})  # ✅ Always return JSON
 
-        except Exception as e:
-            return jsonify({"error": f"Internal server error: {str(e)}"}), 500  # ✅ Return JSON even on errors
+    # if file and allowed_file(file.filename):
+    #     filename = secure_filename(file.filename)
+    #     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    #     file.save(file_path)
 
-    return jsonify({"error": "Invalid file type. Please upload a CSV file."}), 400
+    #     try:
+    #         output_file, extracted_emails = process_csv(file_path)  # ✅ Ensures CSV writing is completed
+    #         return jsonify({"file": output_file, "emails": extracted_emails})  # ✅ Always return JSON
+
+    #     except Exception as e:
+    #         return jsonify({"error": f"Internal server error: {str(e)}"}), 500  # ✅ Return JSON even on errors
+
+    # return jsonify({"error": "Invalid file type. Please upload a CSV file."}), 400
 
 @app.route("/result")
 def result():
