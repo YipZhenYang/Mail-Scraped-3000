@@ -43,7 +43,7 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False
 
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=5)  
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=2)  
         return bool(answers)  
     
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
