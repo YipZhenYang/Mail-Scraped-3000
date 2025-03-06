@@ -1,18 +1,7 @@
-"""
-    Filename: app.py
-    Description: A Flask-based backend for Mail Scraped 3000, handling file uploads, email extraction, validation, 
-                 and CSV processing. Supports CORS for frontend integration.
-    System Name: Mail Scraped 3000
-    Version: 0.1
-    Author: Yip Zhen Yang
-    Date: March 6, 2025
-"""
-
 from flask import Flask, request, jsonify, render_template, send_file
 import re
 import urllib.request
 import csv
-import dns.resolver
 import os
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
@@ -34,22 +23,10 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def validate_email(email_address):
-    """Validates an email using MX records and blacklist."""
+    """Validates an email by checking against a blacklist."""
     BLACKLISTED_DOMAINS = {"sentry.io", "example.com", "test.com"}
-
-    try:
-        domain = email_address.split('@')[1]
-        
-        if domain in BLACKLISTED_DOMAINS:
-            return False
-
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=7)  
-        return bool(answers)  
-    
-    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
-        return False
-    except Exception:
-        return False
+    domain = email_address.split('@')[1]
+    return domain not in BLACKLISTED_DOMAINS
 
 def extract_valid_emails(url_text):
     """Extracts unique, validated emails from webpage text."""
@@ -62,7 +39,7 @@ def fetch_and_extract_emails(url, name):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=1000)  
+        response = urllib.request.urlopen(request, timeout=10)  
         url_text = response.read().decode(errors='ignore')
         return [(name, email) for email in extract_valid_emails(url_text)]
     except Exception as e:
