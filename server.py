@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_file, redirect, url_for
+from flask import Flask, request, jsonify, render_template, send_file
 import re
 import urllib.request
 import csv
@@ -7,7 +7,7 @@ import os
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 
-app = Flask(__name__, template_folder="templates", static_folder="static")  # Ensure templates folder is used
+app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
 
 UPLOAD_FOLDER = "uploads"
@@ -24,32 +24,35 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def validate_email(email_address):
-    """Validates an email by checking its domain's MX records and blacklist."""
-    try:
-        BLACKLISTED_DOMAINS = {"sentry.io", "example.com", "test.com"}  # Add more if needed
+    """Validates an email using MX records and blacklist."""
+    BLACKLISTED_DOMAINS = {"sentry.io", "example.com", "test.com"}
 
+    try:
         domain = email_address.split('@')[1]
         
-        #DNS-based email validation
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=5)  # 5s timeout
-        return bool(answers)
+        if domain in BLACKLISTED_DOMAINS:
+            return False  # Immediately reject blacklisted domains
+
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=5)  
+        return bool(answers)  
     
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
         return False
-    except Exception as e:
+    except Exception:
         return False
 
 def extract_valid_emails(url_text):
-    """Extracts and validates emails from webpage text."""
+    """Extracts unique, validated emails from webpage text."""
     extracted_emails = emailRegex.findall(url_text)
-    return {email for email in extracted_emails if validate_email(email)}  # Only store unique valid emails
+    valid_emails = {email for email in extracted_emails if validate_email(email)}
+    return valid_emails  
 
 def fetch_and_extract_emails(url, name):
-    """Fetches webpage content and extracts valid emails with names."""
+    """Fetches webpage content and extracts validated emails with names."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=10)  # 10-second timeout
+        response = urllib.request.urlopen(request, timeout=10)  
         url_text = response.read().decode(errors='ignore')
         return [(name, email) for email in extract_valid_emails(url_text)]
     except Exception as e:
@@ -57,63 +60,58 @@ def fetch_and_extract_emails(url, name):
         return []
 
 def process_csv(file_path):
-    """Processes a CSV file containing URLs and extracts validated unique emails."""
-    unique_emails = set()
+    """Processes a CSV file containing URLs and extracts unique emails."""
+    unique_emails = {}
+
     with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.reader(csv_file)
         next(csv_reader, None)  # Skip header
+        
         for row in csv_reader:
             if len(row) >= 2:
                 name, url = row[0].strip(), row[1].strip()
                 extracted_emails = fetch_and_extract_emails(url, name)
-                unique_emails.update(extracted_emails)
+                for extracted_name, email in extracted_emails:
+                    unique_emails[email] = extracted_name  # Ensures unique emails
 
-    output_file = "/tmp/emails.csv"  # ✅ Use /tmp/ for Render compatibility
+    output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
     with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
         csv_writer = csv.writer(csv_email_file)
-        csv_writer.writerow(["Name", "Email"])  
-        for name, email in sorted(unique_emails):  
+        csv_writer.writerow(["Name", "Email"])
+        for email, name in unique_emails.items():  
             csv_writer.writerow([name, email])
 
     os.remove(file_path)  # Delete uploaded file
-
-    return output_file, list(unique_emails)
+    return output_file, list(unique_emails.items())
 
 @app.route('/')
 def home():
-    return render_template('index.html')  # Make sure this file exists
+    return render_template('index.html')
 
-                           
 @app.route("/upload", methods=["POST"])
 def upload_file():
-    """Handles CSV file upload and processing."""
+    """Handles CSV file upload and processes it."""
     if "file" not in request.files:
         return jsonify({"error": "No file part"})
 
     file = request.files["file"]
     if file.filename == "":
         return jsonify({"error": "No selected file"})
-    
-    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-    file.save(file_path)
 
-    return jsonify({"message": "File uploaded successfully!"})
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        file.save(file_path)
 
+        try:
+            output_file, extracted_emails = process_csv(file_path)
+            return jsonify({"file": output_file, "emails": extracted_emails})
 
-    # if file and allowed_file(file.filename):
-    #     filename = secure_filename(file.filename)
-    #     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-    #     file.save(file_path)
+        except Exception as e:
+            return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
-    #     try:
-    #         output_file, extracted_emails = process_csv(file_path)  # ✅ Ensures CSV writing is completed
-    #         return jsonify({"file": output_file, "emails": extracted_emails})  # ✅ Always return JSON
-
-    #     except Exception as e:
-    #         return jsonify({"error": f"Internal server error: {str(e)}"}), 500  # ✅ Return JSON even on errors
-
-    # return jsonify({"error": "Invalid file type. Please upload a CSV file."}), 400
+    return jsonify({"error": "Invalid file type. Please upload a CSV file."}), 400
 
 @app.route("/result")
 def result():
@@ -124,11 +122,11 @@ def result():
 @app.route("/download")
 def download():
     """Allows users to download the extracted email file."""
-    file_path = "/tmp/emails.csv"  # ✅ Ensure the correct file path
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True, download_name="emails.csv")
     return "File not found", 404
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # ✅ Use Render-assigned port
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=True)

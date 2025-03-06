@@ -36,11 +36,16 @@
             loadingDiv.style.display = "block"; // Show loading animation
             resultDiv.innerHTML = ""; // Clear previous results
 
-            fetch("https://your-backend.onrender.com/upload", {
+            fetch("https://mail-scraped-3000.onrender.com/upload", {
                 method: "POST",
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 loadingDiv.style.display = "none"; // Hide loading animation
 
@@ -63,10 +68,14 @@
             });
         }
 
-
         function downloadOriginalCSV() {
-            fetch(`https://your-backend.onrender.com/download`)
-            .then(response => response.blob())
+            fetch("https://mail-scraped-3000.onrender.com/download")  // ✅ Fixed URL
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+                }
+                return response.blob();
+            })
             .then(blob => {
                 let url = window.URL.createObjectURL(blob);
                 let a = document.createElement("a");
@@ -77,7 +86,10 @@
                 a.remove();
                 window.URL.revokeObjectURL(url);
             })
-            .catch(error => console.error("Download Error:", error));
+            .catch(error => {
+                console.error("Download Error:", error);
+                alert("Error downloading file. Please try again.");
+            });
         }
     </script>
 </head>
