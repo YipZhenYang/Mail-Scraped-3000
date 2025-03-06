@@ -41,7 +41,7 @@ def validate_email(email_address):
         domain = email_address.split('@')[1]
         
         if domain in BLACKLISTED_DOMAINS:
-            return False  # Immediately reject blacklisted domains
+            return False
 
         answers = dns.resolver.resolve(domain, 'MX', lifetime=5)  
         return bool(answers)  
@@ -82,7 +82,7 @@ def process_csv(file_path):
                 name, url = row[0].strip(), row[1].strip()
                 extracted_emails = fetch_and_extract_emails(url, name)
                 for extracted_name, email in extracted_emails:
-                    unique_emails[email] = extracted_name  # Ensures unique emails
+                    unique_emails[email] = extracted_name
 
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
@@ -92,7 +92,7 @@ def process_csv(file_path):
         for email, name in unique_emails.items():  
             csv_writer.writerow([name, email])
 
-    os.remove(file_path)  # Delete uploaded file
+    os.remove(file_path)
     return output_file, list(unique_emails.items())
 
 @app.route('/')
