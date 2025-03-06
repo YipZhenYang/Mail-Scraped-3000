@@ -1,3 +1,13 @@
+"""
+    Filename: app.py
+    Description: A Flask-based backend for Mail Scraped 3000, handling file uploads, email extraction, validation, 
+                 and CSV processing. Supports CORS for frontend integration.
+    System Name: Mail Scraped 3000
+    Version: 0.1
+    Author: Yip Zhen Yang
+    Date: March 6, 2025
+"""
+
 from flask import Flask, request, jsonify, render_template, send_file
 import re
 import urllib.request

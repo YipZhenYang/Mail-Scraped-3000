@@ -16,10 +16,13 @@
         #downloadOriginalBtn {
             display: block;
         }
+        .email-table {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
     </style>
     <script>
-        let originalFileName = "emails.csv"; // Default original file name
-
         function uploadFile() {
             let fileInput = document.getElementById("fileInput").files[0];
             let resultDiv = document.getElementById("result");
@@ -52,13 +55,25 @@
                 if (data.error) {
                     resultDiv.innerHTML = `<p class="text-danger">Error: ${data.error}</p>`;
                 } else {
-                    let emailsList = "<h3>Extracted Emails:</h3><ul class='list-group mt-3'>";
-                    data.emails.forEach(entry => {
-                        emailsList += `<li class='list-group-item'><strong>${entry[0]}</strong>: ${entry[1]}</li>`;
-                    });
-                    emailsList += "</ul>";
+                    let tableHtml = `
+                        <h3 class="text-center mt-4">Extracted Emails</h3>
+                        <div class="table-responsive email-table">
+                            <table class="table table-striped table-bordered">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
 
-                    resultDiv.innerHTML = emailsList;
+                    data.emails.forEach(entry => {
+                        tableHtml += `<tr><td>${entry[0]}</td><td>${entry[1]}</td></tr>`;
+                    });
+
+                    tableHtml += `</tbody></table></div>`;
+                    resultDiv.innerHTML = tableHtml;
                 }
             })
             .catch(error => {
@@ -69,7 +84,7 @@
         }
 
         function downloadOriginalCSV() {
-            fetch("https://mail-scraped-3000.onrender.com/download")  // ✅ Fixed URL
+            fetch("https://mail-scraped-3000.onrender.com/download")
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`Download failed: ${response.status} ${response.statusText}`);
@@ -80,7 +95,7 @@
                 let url = window.URL.createObjectURL(blob);
                 let a = document.createElement("a");
                 a.href = url;
-                a.download = "emails.csv"; // Ensure correct file name
+                a.download = "emails.csv";
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
@@ -97,16 +112,16 @@
     <div class="card shadow p-4">
         <h2 class="text-center">Email Extractor</h2>
         <input type="file" id="fileInput" accept=".csv" class="form-control mt-3">
-        <button class="btn btn-primary mt-3 w-100" onclick="uploadFile()">Upload & Extract</button>
+        <button class="btn btn-primary mt-3 w-100" onclick="uploadFile()">Extract</button>
 
         <div id="loading">
             <div class="spinner-border text-primary" role="status"></div>
-            <p>Processing... Please wait.</p>
+            <p>Processing... Please wait... im try my faster speed.....</p>
         </div>
 
-        <div id="result" class="mt-4"></div>
+        <button id="downloadOriginalBtn" class="btn btn-secondary mt-3 w-100" onclick="downloadOriginalCSV()">Download File</button>
 
-        <button id="downloadOriginalBtn" class="btn btn-secondary mt-2 w-100" onclick="downloadOriginalCSV()">Download Original Emails File</button>
+        <div id="result" class="mt-4"></div>
     </div>
 </body>
 </html>
