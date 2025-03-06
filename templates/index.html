@@ -1,3 +1,12 @@
+<!--  
+    Filename: index.html  
+    Description: A web-based Email Extractor that allows users to upload CSV files, extract emails, and download the results.  
+    System Name: Mail Scraped 3000  
+    Version: 0.1  
+    Author: Yip Zhen Yang  
+    Date: March 6, 2025  
+-->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,20 +21,18 @@
             text-align: center;
             margin-top: 20px;
         }
-        /* Ensure original file download button is visible */
         #downloadOriginalBtn {
             display: block;
         }
-        .email-table {
-            margin-top: 20px;
-            max-height: 300px;
-            overflow-y: auto;
+        #resultTable {
+            display: none;
         }
     </style>
     <script>
         function uploadFile() {
             let fileInput = document.getElementById("fileInput").files[0];
             let resultDiv = document.getElementById("result");
+            let resultTable = document.getElementById("resultTable");
             let loadingDiv = document.getElementById("loading");
 
             if (!fileInput) {
@@ -36,8 +43,9 @@
             let formData = new FormData();
             formData.append("file", fileInput);
 
-            loadingDiv.style.display = "block"; // Show loading animation
-            resultDiv.innerHTML = ""; // Clear previous results
+            loadingDiv.style.display = "block";
+            resultDiv.innerHTML = "";
+            resultTable.style.display = "none";
 
             fetch("https://mail-scraped-3000.onrender.com/upload", {
                 method: "POST",
@@ -50,30 +58,23 @@
                 return response.json();
             })
             .then(data => {
-                loadingDiv.style.display = "none"; // Hide loading animation
+                loadingDiv.style.display = "none";
 
                 if (data.error) {
                     resultDiv.innerHTML = `<p class="text-danger">Error: ${data.error}</p>`;
                 } else {
-                    let tableHtml = `
-                        <h3 class="text-center mt-4">Extracted Emails</h3>
-                        <div class="table-responsive email-table">
-                            <table class="table table-striped table-bordered">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Email</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
+                    let tableBody = document.getElementById("tableBody");
+                    tableBody.innerHTML = "";
 
                     data.emails.forEach(entry => {
-                        tableHtml += `<tr><td>${entry[0]}</td><td>${entry[1]}</td></tr>`;
+                        let row = `<tr>
+                            <td>${entry[0]}</td>
+                            <td>${entry[1]}</td>
+                        </tr>`;
+                        tableBody.innerHTML += row;
                     });
 
-                    tableHtml += `</tbody></table></div>`;
-                    resultDiv.innerHTML = tableHtml;
+                    resultTable.style.display = "block";
                 }
             })
             .catch(error => {
@@ -112,16 +113,30 @@
     <div class="card shadow p-4">
         <h2 class="text-center">Email Extractor</h2>
         <input type="file" id="fileInput" accept=".csv" class="form-control mt-3">
-        <button class="btn btn-primary mt-3 w-100" onclick="uploadFile()">Extract</button>
+        <button class="btn btn-primary mt-3 w-100" onclick="uploadFile()">Upload & Extract</button>
 
         <div id="loading">
             <div class="spinner-border text-primary" role="status"></div>
-            <p>Processing... Please wait... im try my faster speed.....</p>
+            <p>Processing... Please wait.</p>
         </div>
 
-        <button id="downloadOriginalBtn" class="btn btn-secondary mt-3 w-100" onclick="downloadOriginalCSV()">Download File</button>
-
         <div id="result" class="mt-4"></div>
+
+        <button id="downloadOriginalBtn" class="btn btn-secondary mt-2 w-100" onclick="downloadOriginalCSV()">Download Original Emails File</button>
+
+        <!-- Styled Table -->
+        <div id="resultTable" class="mt-4">
+            <h3 class="text-center">Extracted Emails</h3>
+            <table class="table table-striped table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
     </div>
 </body>
 </html>
