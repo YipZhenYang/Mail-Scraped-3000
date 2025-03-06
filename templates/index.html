@@ -1,12 +1,3 @@
-<!--  
-    Filename: index.html  
-    Description: A web-based Email Extractor that allows users to upload CSV files, extract emails, and download the results.  
-    System Name: Mail Scraped 3000  
-    Version: 0.1  
-    Author: Yip Zhen Yang  
-    Date: March 6, 2025  
--->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -36,7 +27,7 @@
             let loadingDiv = document.getElementById("loading");
 
             if (!fileInput) {
-                alert("Please select a CSV file to upload.");
+                alert("Please select a file.");
                 return;
             }
 
@@ -53,7 +44,7 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    return response.json().then(err => { throw new Error(err.message || `Server Error: ${response.status}`); });
+                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
                 }
                 return response.json();
             })
@@ -66,15 +57,10 @@
                     let tableBody = document.getElementById("tableBody");
                     tableBody.innerHTML = "";
 
-                    if (data.emails.length === 0) {
-                        resultDiv.innerHTML = `<p class="text-warning">No emails found in the uploaded file.</p>`;
-                        return;
-                    }
-
                     data.emails.forEach(entry => {
                         let row = `<tr>
-                            <td>${entry[1] || "Unknown"}</td>
                             <td>${entry[0]}</td>
+                            <td>${entry[1]}</td>
                         </tr>`;
                         tableBody.innerHTML += row;
                     });
@@ -84,11 +70,10 @@
             })
             .catch(error => {
                 loadingDiv.style.display = "none";
-                resultDiv.innerHTML = `<p class="text-danger">Error processing the file: ${error.message}. Please try again.</p>`;
+                resultDiv.innerHTML = `<p class="text-danger">Error processing the file. Please try again.</p>`;
                 console.error("Fetch Error:", error);
             });
         }
-
 
         function downloadOriginalCSV() {
             fetch("https://mail-scraped-3000.onrender.com/download")
@@ -130,6 +115,7 @@
 
         <button id="downloadOriginalBtn" class="btn btn-secondary mt-2 w-100" onclick="downloadOriginalCSV()">Download Original Emails File</button>
 
+        <!-- Styled Table -->
         <div id="resultTable" class="mt-4">
             <h3 class="text-center">Extracted Emails</h3>
             <table class="table table-striped table-bordered">
