@@ -65,13 +65,13 @@
 
 
         function downloadOriginalCSV() {
-            fetch(`http://127.0.0.1:5000/download?file=${originalFileName}`)
+            fetch(`https://your-backend.onrender.com/download`)
             .then(response => response.blob())
             .then(blob => {
                 let url = window.URL.createObjectURL(blob);
                 let a = document.createElement("a");
                 a.href = url;
-                a.download = originalFileName;
+                a.download = "emails.csv"; // Ensure correct file name
                 document.body.appendChild(a);
                 a.click();
                 a.remove();

@@ -56,28 +56,28 @@ def fetch_and_extract_emails(url, name):
         return []
 
 def process_csv(file_path):
-    """Processes a CSV file containing URLs and extracts only validated unique emails with names."""
+    """Processes a CSV file containing URLs and extracts validated unique emails."""
     unique_emails = set()
     with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.reader(csv_file)
-        next(csv_reader, None)
+        next(csv_reader, None)  # Skip header
         for row in csv_reader:
             if len(row) >= 2:
                 name, url = row[0].strip(), row[1].strip()
                 extracted_emails = fetch_and_extract_emails(url, name)
                 unique_emails.update(extracted_emails)
 
-    output_file = "emails.csv"  
+    output_file = "/tmp/emails.csv"  # ✅ Use /tmp/ for Render compatibility
 
     with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
         csv_writer = csv.writer(csv_email_file)
-        csv_writer.writerow(["Name", "Email"])  # Add header
+        csv_writer.writerow(["Name", "Email"])  
         for name, email in sorted(unique_emails):  
             csv_writer.writerow([name, email])
 
-    os.remove(file_path)  # Delete uploaded CSV after processing
+    os.remove(file_path)  # Delete uploaded file
 
-    return output_file, list(unique_emails)  # ✅ Ensure emails are returned
+    return output_file, list(unique_emails)
 
 @app.route('/')
 def home():
@@ -117,10 +117,11 @@ def result():
 @app.route("/download")
 def download():
     """Allows users to download the extracted email file."""
-    file_name = request.args.get("file", "")
-    if os.path.exists(file_name):
-        return send_file(file_name, as_attachment=True)
+    file_path = "/tmp/emails.csv"  # ✅ Ensure the correct file path
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True, download_name="emails.csv")
     return "File not found", 404
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000, debug=True)
+    port = int(os.environ.get("PORT", 10000))  # ✅ Use Render-assigned port
+    app.run(host="0.0.0.0", port=port, debug=True)
