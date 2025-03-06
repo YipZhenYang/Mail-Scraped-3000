@@ -36,7 +36,7 @@
             let loadingDiv = document.getElementById("loading");
 
             if (!fileInput) {
-                alert("Please select a file.");
+                alert("Please select a CSV file to upload.");
                 return;
             }
 
@@ -53,7 +53,7 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+                    return response.json().then(err => { throw new Error(err.message || `Server Error: ${response.status}`); });
                 }
                 return response.json();
             })
@@ -66,9 +66,14 @@
                     let tableBody = document.getElementById("tableBody");
                     tableBody.innerHTML = "";
 
+                    if (data.emails.length === 0) {
+                        resultDiv.innerHTML = `<p class="text-warning">No emails found in the uploaded file.</p>`;
+                        return;
+                    }
+
                     data.emails.forEach(entry => {
                         let row = `<tr>
-                            <td>${entry[1]}</td>
+                            <td>${entry[1] || "Unknown"}</td>
                             <td>${entry[0]}</td>
                         </tr>`;
                         tableBody.innerHTML += row;
@@ -79,10 +84,11 @@
             })
             .catch(error => {
                 loadingDiv.style.display = "none";
-                resultDiv.innerHTML = `<p class="text-danger">Error processing the file. Please try again.</p>`;
+                resultDiv.innerHTML = `<p class="text-danger">Error processing the file: ${error.message}. Please try again.</p>`;
                 console.error("Fetch Error:", error);
             });
         }
+
 
         function downloadOriginalCSV() {
             fetch("https://mail-scraped-3000.onrender.com/download")
