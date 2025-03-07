@@ -1,15 +1,14 @@
-from flask import Flask, request, jsonify, render_template, send_file, url_for
 from celery import Celery
+from flask import Flask, request, jsonify, render_template, send_file
 import re
 import urllib.request
 import csv
 import dns.resolver
 import os
-import time
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 
-# Flask App Configuration
+# Flask App Setup
 app = Flask(__name__)
 CORS(app)
 
@@ -20,12 +19,15 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+# Celery Configuration
 app.config["CELERY_BROKER_URL"] = "redis://localhost:6379/0"
 app.config["CELERY_RESULT_BACKEND"] = "redis://localhost:6379/0"
 
 celery = Celery(app.name, broker=app.config["CELERY_BROKER_URL"])
 celery.conf.update(app.config)
 
+# Regex for email extraction
 emailRegex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
 def allowed_file(filename):
@@ -39,7 +41,7 @@ def validate_email(email_address):
         domain = email_address.split('@')[1]
         
         if domain in BLACKLISTED_DOMAINS:
-            return False  # Immediately reject blacklisted domains
+            return False  
 
         answers = dns.resolver.resolve(domain, 'MX', lifetime=5)  
         return bool(answers)  
@@ -67,28 +69,23 @@ def fetch_and_extract_emails(url, name):
         print(f"Error fetching {url}: {e}")
         return []
 
-@celery.task(bind=True)
-def process_csv_task(self, file_path):
+@celery.task
+def process_csv_task(file_path):
     """Processes a CSV file asynchronously using Celery."""
     unique_emails = {}
 
     with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
         csv_reader = csv.reader(csv_file)
-        next(csv_reader, None)  # Skip header
-        
-        total_lines = sum(1 for _ in open(file_path, 'r', encoding='utf-8')) - 1
-        csv_file.seek(0)  # Reset reader position
-        next(csv_reader, None)  # Skip header again
+        next(csv_reader, None)  
 
-        for i, row in enumerate(csv_reader, start=1):
+        for row in csv_reader:
             if len(row) >= 2:
                 name, url = row[0].strip(), row[1].strip()
                 extracted_emails = fetch_and_extract_emails(url, name)
                 for extracted_name, email in extracted_emails:
-                    unique_emails[email] = extracted_name  # Ensures unique emails
-            self.update_state(state="PROGRESS", meta={"progress": (i / total_lines) * 100})
+                    unique_emails[email] = extracted_name  
 
-    output_file = os.path.join(UPLOAD_FOLDER, "emails.csv")
+    output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
     with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
         csv_writer = csv.writer(csv_email_file)
@@ -96,12 +93,16 @@ def process_csv_task(self, file_path):
         for email, name in unique_emails.items():  
             csv_writer.writerow([name, email])
 
-    os.remove(file_path)  # Delete uploaded file
-    return {"file": output_file, "emails": list(unique_emails.items())}
+    os.remove(file_path)  
+    return output_file, list(unique_emails.items())
 
-@app.route('/upload', methods=['POST'])
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+@app.route("/upload", methods=["POST"])
 def upload_file():
-    """Handles CSV file upload and starts background task."""
+    """Handles CSV file upload and processes it asynchronously."""
     if "file" not in request.files:
         return jsonify({"error": "No file part"})
 
@@ -114,32 +115,33 @@ def upload_file():
         file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(file_path)
 
-        task = process_csv_task.apply_async(args=[file_path])  # Start Celery Task
-        return jsonify({"task_id": task.id, "status_url": url_for("task_status", task_id=task.id, _external=True)})
+        task = process_csv_task.apply_async(args=[file_path])
+        return jsonify({"task_id": task.id, "status": "Processing started"})
 
     return jsonify({"error": "Invalid file type. Please upload a CSV file."}), 400
 
-@app.route('/status/<task_id>')
+@app.route("/task_status/<task_id>")
 def task_status(task_id):
-    """Check task status."""
+    """Checks the status of a Celery task."""
     task = process_csv_task.AsyncResult(task_id)
-
-    if task.state == 'PENDING':
+    if task.state == "PENDING":
         response = {"status": "Pending"}
-    elif task.state == 'PROGRESS':
-        response = {"status": "In Progress", "progress": task.info.get("progress", 0)}
-    elif task.state == 'SUCCESS':
+    elif task.state == "SUCCESS":
         response = {"status": "Completed", "result": task.result}
-    elif task.state == 'FAILURE':
+    elif task.state == "FAILURE":
         response = {"status": "Failed", "error": str(task.info)}
     else:
-        response = {"status": task.state}
-
+        response = {"status": "Processing"}
+    
     return jsonify(response)
+
+@app.route("/result")
+def result():
+    file_name = request.args.get("file", "")
+    return render_template("result.html", file_name=file_name)
 
 @app.route("/download")
 def download():
-    """Allows users to download the extracted email file."""
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True, download_name="emails.csv")
