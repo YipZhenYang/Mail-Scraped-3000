@@ -90,26 +90,34 @@ def fetch_and_extract_emails(url, name):
 
 
 def process_csv(file_path):
-    """Processes CSV file containing URLs and extracts emails."""
+    """Processes a CSV file containing URLs and extracts unique emails in parallel."""
+    unique_emails = {}
+
+    with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
+        csv_reader = csv.reader(csv_file)
+        next(csv_reader, None)  # Skip header
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            results = executor.map(lambda row: fetch_and_extract_emails(row[1].strip(), row[0].strip()), csv_reader)
+
+        for extracted_emails in results:
+            for extracted_name, email in extracted_emails:
+                unique_emails[email] = extracted_name  # Ensures unique emails
+
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
     with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
         csv_writer = csv.writer(csv_email_file)
         csv_writer.writerow(["Name", "Email"])
+        for email, name in unique_emails.items():
+            csv_writer.writerow([name, email])
 
-        with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
-            csv_reader = csv.reader(csv_file)
-            next(csv_reader, None)  # Skip header
+    try:
+        os.remove(file_path)  # Delete uploaded file
+    except FileNotFoundError:
+        pass
 
-            for row in csv_reader:
-                if len(row) >= 2:
-                    name, url = row[0].strip(), row[1].strip()
-                    extracted_emails = fetch_and_extract_emails(url, name)
-                    for extracted_name, email in extracted_emails:
-                        csv_writer.writerow([extracted_name, email])  # Write directly
-
-    os.remove(file_path)  # Delete uploaded file
-    return output_file
+    return output_file, list(unique_emails.items())
 
 
 @app.route('/')
