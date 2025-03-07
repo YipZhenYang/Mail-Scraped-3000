@@ -27,9 +27,9 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
-MAX_WORKERS = 10  # Increased workers for large files
-MAX_UPLOAD_SIZE = 1 * 1024 * 1024  # 1MB file upload limit
-REQUEST_TIMEOUT = 300  # Increased timeout to 5 minutes
+MAX_WORKERS = 50 
+MAX_UPLOAD_SIZE = 50 * 1024
+REQUEST_TIMEOUT = 300  
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
