@@ -29,7 +29,7 @@ UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
 MAX_WORKERS = 1  # Reduce to prevent high memory usage
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # Fixed to 50MB
-REQUEST_TIMEOUT = 900
+REQUEST_TIMEOUT = 60
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -93,43 +93,41 @@ def fetch_and_extract_emails(url, name):
         return []
 
 
+import gc  # Import garbage collector
+
 def process_csv(file_path):
-    """Processes a CSV file containing URLs and extracts unique emails in parallel."""
-    unique_emails = {}
-
-    with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
-        csv_reader = csv.reader(csv_file)
-        next(csv_reader, None)  # Skip header
-
-        tasks = []
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            for row in csv_reader:
-                if len(row) < 2:
-                    continue  # Skip malformed rows
-                tasks.append(executor.submit(fetch_and_extract_emails, row[1].strip(), row[0].strip()))
-
-            for future in as_completed(tasks):  # Process tasks efficiently
-                try:
-                    extracted_emails = future.result()
-                    for extracted_name, email in extracted_emails:
-                        unique_emails[email] = extracted_name  # Ensures unique emails
-                except Exception as e:
-                    logging.error(f"Error processing task: {e}")
-
+    """Processes a CSV file containing URLs and extracts unique emails one by one to free memory."""
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
-    with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
-        csv_writer = csv.writer(csv_email_file)
-        csv_writer.writerow(["Name", "Email"])
-        for email, name in unique_emails.items():
-            csv_writer.writerow([name, email])
+    with open(file_path, 'r', newline='', encoding='utf-8') as csv_file, \
+         open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
 
+        csv_reader = csv.reader(csv_file)
+        csv_writer = csv.writer(csv_email_file)
+        csv_writer.writerow(["Name", "Email"])  # Write header
+        
+        next(csv_reader, None)  # Skip header if present
+
+        for row in csv_reader:
+            if len(row) < 2:
+                continue  # Skip malformed rows
+            
+            name, url = row[0].strip(), row[1].strip()
+            extracted_emails = fetch_and_extract_emails(url, name)  # Fetch and process one by one
+            
+            for extracted_name, email in extracted_emails:
+                csv_writer.writerow([extracted_name, email])  # Write to file immediately
+
+            # Free memory
+            del extracted_emails
+            gc.collect()  # Force garbage collection
+    
     try:
         os.remove(file_path)  # Delete uploaded file
     except FileNotFoundError:
         pass
 
-    return output_file, list(unique_emails.items())
+    return output_file
 
 
 @app.route('/')
@@ -190,4 +188,5 @@ def handle_large_file(error):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Optimized performance
+    app.run(host="0.0.0.0", port=port, threaded=True)
+    # app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Optimized performance
