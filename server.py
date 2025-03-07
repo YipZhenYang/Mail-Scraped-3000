@@ -16,7 +16,7 @@ import re
 import urllib.request
 import dns.resolver
 import logging
-import gc
+from concurrent.futures import ThreadPoolExecutor
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -27,9 +27,9 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
-MAX_WORKERS = 1  # Reduce workers to prevent high memory usage
-MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
-REQUEST_TIMEOUT = 60
+MAX_WORKERS = 2
+MAX_UPLOAD_SIZE = 30 * 1024
+REQUEST_TIMEOUT = 600
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -59,11 +59,10 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False  # Immediately reject blacklisted domains
 
-        try:
-            answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Reduced timeout
-            return bool(answers)
-        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
-            return False
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=15)  # Increased timeout
+        return bool(answers)
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
+        return False
     except Exception:
         return False
 
@@ -80,9 +79,8 @@ def fetch_and_extract_emails(url, name):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=10)  # Set timeout
+        response = urllib.request.urlopen(request, timeout=10)  # Increased timeout
         url_text = response.read().decode(errors='ignore')
-
         return [(name, email) for email in extract_valid_emails(url_text)]
     except urllib.error.URLError as e:
         logging.error(f"Network error for {url}: {e.reason}")
@@ -96,38 +94,34 @@ def fetch_and_extract_emails(url, name):
 
 
 def process_csv(file_path):
-    """Processes a CSV file containing URLs and extracts unique emails one by one to free memory."""
+    """Processes a CSV file containing URLs and extracts unique emails in parallel."""
+    unique_emails = {}
+
+    with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
+        csv_reader = csv.reader(csv_file)
+        next(csv_reader, None)  # Skip header
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            results = executor.map(lambda row: fetch_and_extract_emails(row[1].strip(), row[0].strip()), csv_reader)
+
+        for extracted_emails in results:
+            for extracted_name, email in extracted_emails:
+                unique_emails[email] = extracted_name  # Ensures unique emails
+
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
-    with open(file_path, 'r', newline='', encoding='utf-8') as csv_file, \
-         open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
-
-        csv_reader = csv.reader(csv_file)
+    with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
         csv_writer = csv.writer(csv_email_file)
-        csv_writer.writerow(["Name", "Email"])  # Write header
-        
-        next(csv_reader, None)  # Skip header if present
-
-        for row in csv_reader:
-            if len(row) < 2:
-                continue  # Skip malformed rows
-            
-            name, url = row[0].strip(), row[1].strip()
-            extracted_emails = fetch_and_extract_emails(url, name)  # Fetch and process one by one
-            
-            for extracted_name, email in extracted_emails:
-                csv_writer.writerow([extracted_name, email])  # Write to file immediately
-
-            # Free memory
-            del extracted_emails, row, name, url
-            gc.collect()  # Force garbage collection
+        csv_writer.writerow(["Name", "Email"])
+        for email, name in unique_emails.items():
+            csv_writer.writerow([name, email])
 
     try:
         os.remove(file_path)  # Delete uploaded file
     except FileNotFoundError:
         pass
 
-    return output_file
+    return output_file, list(unique_emails.items())
 
 
 @app.route('/')
@@ -155,8 +149,8 @@ def upload_file():
             return jsonify({"error": f"Failed to save file: {str(e)}"}), 500
 
         try:
-            output_file = process_csv(file_path)  # Fixed unpacking issue
-            return jsonify({"file": output_file})
+            output_file, extracted_emails = process_csv(file_path)
+            return jsonify({"file": output_file, "emails": extracted_emails})
         except Exception as e:
             logging.error(f"Processing error: {e}")
             return jsonify({"error": f"Internal server error: {str(e)}"}), 500
@@ -183,9 +177,9 @@ def download():
 @app.errorhandler(RequestEntityTooLarge)
 def handle_large_file(error):
     """Handles file size limit errors."""
-    return jsonify({"error": "File too large. Maximum allowed size is 50MB."}), 413
+    return jsonify({"error": "File too large. Maximum allowed size is 1MB."}), 413
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Increased performance
