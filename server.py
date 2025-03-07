@@ -1,9 +1,9 @@
 """
     Filename: app.py
-    Description: A Flask-based backend for Mail Scraped 3000, handling file uploads, email extraction, validation, 
-                 and CSV processing. Supports CORS for frontend integration.
+    Description: Optimized Flask backend for Mail Scraped 3000, handling large-scale email extraction with 
+                 better performance, error handling, and retries.
     System Name: Mail Scraped 3000
-    Version: 0.4
+    Version: 0.5
     Author: Yip Zhen Yang
     Date: March 7, 2025
 """
@@ -16,8 +16,9 @@ import re
 import urllib.request
 import dns.resolver
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
+import time
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -26,7 +27,10 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
-MAX_WORKERS = 5  # Controls concurrency
+MAX_WORKERS = 15  # Increased parallel threads
+RETRY_LIMIT = 3   # Retry failed requests
+REQUEST_TIMEOUT = 15  # Increased timeout
+DNS_TIMEOUT = 5  # Reduced DNS resolver timeout
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -55,7 +59,7 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False  # Immediately reject blacklisted domains
 
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Increased timeout
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=DNS_TIMEOUT)  # Reduced timeout
         return bool(answers)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
         return False
@@ -70,23 +74,29 @@ def extract_valid_emails(url_text):
     return valid_emails
 
 
-def fetch_and_extract_emails(url, name):
+def fetch_and_extract_emails(url, name, retries=0):
     """Fetches webpage content and extracts validated emails with names."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=5)  # Reduced timeout
+        response = urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT)  # Increased timeout
         url_text = response.read().decode(errors='ignore')
         return [(name, email) for email in extract_valid_emails(url_text)]
+    
     except urllib.error.URLError as e:
         logging.error(f"Network error for {url}: {e.reason}")
-        return []
     except urllib.error.HTTPError as e:
         logging.error(f"HTTP error {e.code} for {url}: {e.reason}")
-        return []
     except Exception as e:
         logging.error(f"Error fetching {url}: {e}")
-        return []
+
+    # Retry logic
+    if retries < RETRY_LIMIT:
+        time.sleep(2)  # Small delay before retry
+        logging.info(f"Retrying {url} (Attempt {retries+1}/{RETRY_LIMIT})")
+        return fetch_and_extract_emails(url, name, retries=retries+1)
+
+    return []
 
 
 def process_csv(file_path):
@@ -98,11 +108,13 @@ def process_csv(file_path):
         next(csv_reader, None)  # Skip header
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            results = executor.map(lambda row: fetch_and_extract_emails(row[1].strip(), row[0].strip()), csv_reader)
+            future_to_url = {executor.submit(fetch_and_extract_emails, row[1].strip(), row[0].strip()): row
+                             for row in csv_reader}
 
-        for extracted_emails in results:
-            for extracted_name, email in extracted_emails:
-                unique_emails[email] = extracted_name  # Ensures unique emails
+            for future in as_completed(future_to_url):
+                extracted_emails = future.result()
+                for extracted_name, email in extracted_emails:
+                    unique_emails[email] = extracted_name  # Ensures unique emails
 
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
