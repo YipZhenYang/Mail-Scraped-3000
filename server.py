@@ -3,7 +3,7 @@
     Description: A Flask-based backend for Mail Scraped 3000, handling file uploads, email extraction, validation, 
                  and CSV processing. Supports CORS for frontend integration.
     System Name: Mail Scraped 3000
-    Version: 0.4 (Optimized)
+    Version: 0.4
     Author: Yip Zhen Yang
     Date: March 7, 2025
 """
@@ -15,27 +15,33 @@ import csv
 import re
 import urllib.request
 import dns.resolver
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from werkzeug.utils import secure_filename
-import concurrent.futures
 
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
+# Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
+MAX_WORKERS = 5  # Controls concurrency
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # Allow 500MB files
 
-# Reduce memory usage by limiting parallel workers
-MAX_WORKERS = 2  # Lowered from 5 to reduce memory usage
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 
+# Email regex pattern
 emailRegex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
+
 def allowed_file(filename):
+    """Checks if uploaded file is allowed."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
@@ -49,7 +55,7 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False  # Immediately reject blacklisted domains
 
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=3)  # Reduce timeout to avoid hanging
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Increased timeout
         return bool(answers)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
         return False
@@ -60,12 +66,7 @@ def validate_email(email_address):
 def extract_valid_emails(url_text):
     """Extracts unique, validated emails from webpage text."""
     extracted_emails = emailRegex.findall(url_text)
-    valid_emails = set()
-
-    for email in extracted_emails:
-        if validate_email(email):
-            valid_emails.add(email)
-
+    valid_emails = {email for email in extracted_emails if validate_email(email)}
     return valid_emails
 
 
@@ -74,45 +75,41 @@ def fetch_and_extract_emails(url, name):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=5)  # Reduce fetch timeout to 5s
+        response = urllib.request.urlopen(request, timeout=5)  # Reduced timeout
         url_text = response.read().decode(errors='ignore')
-
         return [(name, email) for email in extract_valid_emails(url_text)]
+    except urllib.error.URLError as e:
+        logging.error(f"Network error for {url}: {e.reason}")
+        return []
+    except urllib.error.HTTPError as e:
+        logging.error(f"HTTP error {e.code} for {url}: {e.reason}")
+        return []
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
+        logging.error(f"Error fetching {url}: {e}")
         return []
 
 
 def process_csv(file_path):
-    """Processes a CSV file containing URLs and extracts unique emails using threads."""
-    unique_emails = {}
-
-    with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
-        csv_reader = csv.reader(csv_file)
-        next(csv_reader, None)  # Skip header
-        
-        tasks = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            for row in csv_reader:
-                if len(row) >= 2:
-                    name, url = row[0].strip(), row[1].strip()
-                    tasks.append(executor.submit(fetch_and_extract_emails, url, name))
-
-            for future in concurrent.futures.as_completed(tasks):
-                extracted_emails = future.result()
-                for extracted_name, email in extracted_emails:
-                    unique_emails[email] = extracted_name  # Ensures unique emails
-
+    """Processes CSV file containing URLs and extracts emails."""
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
     with open(output_file, 'w', newline='', encoding='utf-8') as csv_email_file:
         csv_writer = csv.writer(csv_email_file)
         csv_writer.writerow(["Name", "Email"])
-        for email, name in unique_emails.items():
-            csv_writer.writerow([name, email])
+
+        with open(file_path, 'r', newline='', encoding='utf-8') as csv_file:
+            csv_reader = csv.reader(csv_file)
+            next(csv_reader, None)  # Skip header
+
+            for row in csv_reader:
+                if len(row) >= 2:
+                    name, url = row[0].strip(), row[1].strip()
+                    extracted_emails = fetch_and_extract_emails(url, name)
+                    for extracted_name, email in extracted_emails:
+                        csv_writer.writerow([extracted_name, email])  # Write directly
 
     os.remove(file_path)  # Delete uploaded file
-    return output_file, list(unique_emails.items())
+    return output_file
 
 
 @app.route('/')
@@ -139,6 +136,7 @@ def upload_file():
             output_file, extracted_emails = process_csv(file_path)
             return jsonify({"file": output_file, "emails": extracted_emails})
         except Exception as e:
+            logging.error(f"Processing error: {e}")
             return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
     return jsonify({"error": "Invalid file type. Please upload a CSV file."}), 400
@@ -162,4 +160,4 @@ def download():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)  # Production-ready (debug=False)
