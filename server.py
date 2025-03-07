@@ -3,7 +3,7 @@
     Description: A Flask-based backend for Mail Scraped 3000, handling file uploads, email extraction, validation, 
                  and CSV processing. Supports CORS for frontend integration.
     System Name: Mail Scraped 3000
-    Version: 0.4
+    Version: 1.2
     Author: Yip Zhen Yang
     Date: March 7, 2025
 """
@@ -18,6 +18,7 @@ import dns.resolver
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import RequestEntityTooLarge
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -26,12 +27,15 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
-MAX_WORKERS = 5  # Controls concurrency
+MAX_WORKERS = 10  # Increased workers for large files
+MAX_UPLOAD_SIZE = 1 * 1024 * 1024  # 1MB file upload limit
+REQUEST_TIMEOUT = 300  # Increased timeout to 5 minutes
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_SIZE  # Limit file upload size
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +59,7 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False  # Immediately reject blacklisted domains
 
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Increased timeout
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=15)  # Increased timeout
         return bool(answers)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
         return False
@@ -75,7 +79,7 @@ def fetch_and_extract_emails(url, name):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=5)  # Reduced timeout
+        response = urllib.request.urlopen(request, timeout=10)  # Increased timeout
         url_text = response.read().decode(errors='ignore')
         return [(name, email) for email in extract_valid_emails(url_text)]
     except urllib.error.URLError as e:
@@ -138,7 +142,11 @@ def upload_file():
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-        file.save(file_path)
+
+        try:
+            file.save(file_path)
+        except Exception as e:
+            return jsonify({"error": f"Failed to save file: {str(e)}"}), 500
 
         try:
             output_file, extracted_emails = process_csv(file_path)
@@ -166,6 +174,12 @@ def download():
     return "File not found", 404
 
 
+@app.errorhandler(RequestEntityTooLarge)
+def handle_large_file(error):
+    """Handles file size limit errors."""
+    return jsonify({"error": "File too large. Maximum allowed size is 1MB."}), 413
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)  # Production-ready (debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Increased performance
