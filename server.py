@@ -16,7 +16,7 @@ import re
 import urllib.request
 import dns.resolver
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -27,8 +27,8 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
-MAX_WORKERS = 1  # Reduce to prevent high memory usage
-MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # Fixed to 50MB
+MAX_WORKERS = 1  # Reduce workers to prevent high memory usage
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 REQUEST_TIMEOUT = 60
 
 if not os.path.exists(UPLOAD_FOLDER):
@@ -59,10 +59,11 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False  # Immediately reject blacklisted domains
 
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Reduced timeout
-        return bool(answers)
-    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
-        return False
+        try:
+            answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Reduced timeout
+            return bool(answers)
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
+            return False
     except Exception:
         return False
 
@@ -81,6 +82,7 @@ def fetch_and_extract_emails(url, name):
         request = urllib.request.Request(url, None, headers)
         response = urllib.request.urlopen(request, timeout=10)  # Set timeout
         url_text = response.read().decode(errors='ignore')
+
         return [(name, email) for email in extract_valid_emails(url_text)]
     except urllib.error.URLError as e:
         logging.error(f"Network error for {url}: {e.reason}")
@@ -92,8 +94,6 @@ def fetch_and_extract_emails(url, name):
         logging.error(f"Error fetching {url}: {e}")
         return []
 
-
-import gc  # Import garbage collector
 
 def process_csv(file_path):
     """Processes a CSV file containing URLs and extracts unique emails one by one to free memory."""
@@ -119,9 +119,9 @@ def process_csv(file_path):
                 csv_writer.writerow([extracted_name, email])  # Write to file immediately
 
             # Free memory
-            del extracted_emails
+            del extracted_emails, row, name, url
             gc.collect()  # Force garbage collection
-    
+
     try:
         os.remove(file_path)  # Delete uploaded file
     except FileNotFoundError:
@@ -155,8 +155,8 @@ def upload_file():
             return jsonify({"error": f"Failed to save file: {str(e)}"}), 500
 
         try:
-            output_file, extracted_emails = process_csv(file_path)
-            return jsonify({"file": output_file, "emails": extracted_emails})
+            output_file = process_csv(file_path)  # Fixed unpacking issue
+            return jsonify({"file": output_file})
         except Exception as e:
             logging.error(f"Processing error: {e}")
             return jsonify({"error": f"Internal server error: {str(e)}"}), 500
@@ -189,4 +189,3 @@ def handle_large_file(error):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, threaded=True)
-    # app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Optimized performance
