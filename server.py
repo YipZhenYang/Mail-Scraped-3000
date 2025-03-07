@@ -16,7 +16,7 @@ import re
 import urllib.request
 import dns.resolver
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -27,8 +27,8 @@ CORS(app)
 # Configuration
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"csv"}
-MAX_WORKERS = 5
-MAX_UPLOAD_SIZE = 50 * 1024
+MAX_WORKERS = 3  # Reduce to prevent high memory usage
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # Fixed to 50MB
 REQUEST_TIMEOUT = 600
 
 if not os.path.exists(UPLOAD_FOLDER):
@@ -59,7 +59,7 @@ def validate_email(email_address):
         if domain in BLACKLISTED_DOMAINS:
             return False  # Immediately reject blacklisted domains
 
-        answers = dns.resolver.resolve(domain, 'MX', lifetime=15)  # Increased timeout
+        answers = dns.resolver.resolve(domain, 'MX', lifetime=10)  # Reduced timeout
         return bool(answers)
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.LifetimeTimeout):
         return False
@@ -79,7 +79,7 @@ def fetch_and_extract_emails(url, name):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         request = urllib.request.Request(url, None, headers)
-        response = urllib.request.urlopen(request, timeout=10)  # Increased timeout
+        response = urllib.request.urlopen(request, timeout=10)  # Set timeout
         url_text = response.read().decode(errors='ignore')
         return [(name, email) for email in extract_valid_emails(url_text)]
     except urllib.error.URLError as e:
@@ -101,12 +101,20 @@ def process_csv(file_path):
         csv_reader = csv.reader(csv_file)
         next(csv_reader, None)  # Skip header
 
+        tasks = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            results = executor.map(lambda row: fetch_and_extract_emails(row[1].strip(), row[0].strip()), csv_reader)
+            for row in csv_reader:
+                if len(row) < 2:
+                    continue  # Skip malformed rows
+                tasks.append(executor.submit(fetch_and_extract_emails, row[1].strip(), row[0].strip()))
 
-        for extracted_emails in results:
-            for extracted_name, email in extracted_emails:
-                unique_emails[email] = extracted_name  # Ensures unique emails
+            for future in as_completed(tasks):  # Process tasks efficiently
+                try:
+                    extracted_emails = future.result()
+                    for extracted_name, email in extracted_emails:
+                        unique_emails[email] = extracted_name  # Ensures unique emails
+                except Exception as e:
+                    logging.error(f"Error processing task: {e}")
 
     output_file = os.path.join(app.config["UPLOAD_FOLDER"], "emails.csv")
 
@@ -177,9 +185,9 @@ def download():
 @app.errorhandler(RequestEntityTooLarge)
 def handle_large_file(error):
     """Handles file size limit errors."""
-    return jsonify({"error": "File too large. Maximum allowed size is 1MB."}), 413
+    return jsonify({"error": "File too large. Maximum allowed size is 50MB."}), 413
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Increased performance
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)  # Optimized performance
